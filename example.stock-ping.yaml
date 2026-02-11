@@ -1,0 +1,42 @@
+# stock-ping 示例配置文件
+# 复制此文件到 ~/.stock-ping.yaml 并填入你的 API Key
+
+# Finnhub API 配置 (免费注册: https://finnhub.io/)
+finnhub:
+  api_key: "your_finnhub_api_key_here"
+
+# Bark 推送配置 (iOS App: https://github.com/Finb/Bark)
+bark:
+  server_url: "https://api.day.app"
+  key: "your_bark_key_here"
+
+# 刷新间隔 (秒)
+interval: 60
+
+# 监控规则
+rules:
+  - symbol: AAPL
+    market: US
+    name: Apple Inc.
+    price_above: 200.00 # 价格高于 $200 时提醒
+    change_below: -2.0
+  - symbol: BTC-USD
+    market: CRYPTO
+    name: Bitcoin
+    change_above: 5.0 # 涨幅超过 5% 时提醒
+  - symbol: 600519.SS
+    market: CN
+    name: Kweichow Moutai
+    change_above: 3.03
+    change_below: -3
+
+  - symbol: 2330.TW
+    market: TW
+    name: TSMC (Taiwan)
+    price_above: 600
+
+  - symbol: XAU-USD
+    market: FOREX
+    name: Gold
+    price_below: 2000
+
