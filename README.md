@@ -24,6 +24,7 @@
 
 **Stock Ping** is a lightweight, terminal-native stock monitoring tool built with Go. It provides a beautiful interactive TUI dashboard to track your portfolio and market movements in real-time, with push notifications to your phone when price alerts are triggered.
 
+<a id="features"></a>
 ## ✨ Features
 
 ### 📊 Interactive TUI Dashboard
@@ -60,6 +61,7 @@ Market-aware scheduling automatically pauses data fetching during off-hours and 
 - **Lightweight & Fast** — Single binary, zero external runtime dependencies, minimal memory footprint
 - **Beautiful Catppuccin Theme** — Carefully crafted color palette based on [Catppuccin Mocha](https://catppuccin.com/) for a premium terminal experience
 
+<a id="screenshots"></a>
 ## 📸 Screenshots
 
 ### Portfolio View
@@ -81,6 +83,7 @@ Market-aware scheduling automatically pauses data fetching during off-hours and 
 ![](pics/trend.png)
 
 
+<a id="installation"></a>
 ## 📦 Installation
 
 ### From Source
@@ -101,6 +104,7 @@ go install .
 - A [Finnhub](https://finnhub.io/) API key (free tier available)
 - *(Optional)* [Bark](https://github.com/Finb/Bark) for iOS push notifications
 
+<a id="quick-start"></a>
 ## 🚀 Quick Start
 
 ### 1. Create your config file
@@ -143,6 +147,7 @@ stock-ping dashboard
 stock-ping ui
 ```
 
+<a id="configuration"></a>
 ## ⚙️ Configuration
 
 The config file lives at `~/.stock-ping.yaml`. Here's a full example:
@@ -208,6 +213,7 @@ holdings:
 | `change_above` | Alert when daily gain exceeds the percentage |
 | `change_below` | Alert when daily loss exceeds the percentage (use negative value) |
 
+<a id="usage"></a>
 ## 📖 Usage
 
 ### Commands
@@ -315,6 +321,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+<a id="license"></a>
 ## 📄 License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
