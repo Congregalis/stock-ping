@@ -66,7 +66,8 @@ Market-aware scheduling automatically pauses data fetching during off-hours and 
 
 ### Portfolio View
 
-> Track your holdings, current value, total cost, and P/L at a glance. Privacy mode masks sensitive data.
+> Track your holdings with realized/unrealized/total P/L at a glance. Privacy mode masks sensitive data.
+> In TUI position editing, selling to zero auto-removes the holding.
 
 ![](pics/portfolio.png)
 
@@ -199,9 +200,11 @@ holdings:
   - symbol: AAPL
     quantity: 100
     cost_price: 150.50
+    realized_pnl: 0
   - symbol: NVDA
     quantity: 50
     cost_price: 120.00
+    realized_pnl: 0
 ```
 
 ### Alert Conditions
@@ -233,12 +236,16 @@ holdings:
 | `stock-ping config remove` | Remove a rule |
 | `stock-ping version` | Show version |
 
-### Keyboard Shortcuts (Dashboard)
+### Keyboard Shortcuts (Dashboard & Portfolio)
 
 | Key | Action |
 |-----|--------|
 | `r` | Refresh all stocks |
 | `s` | Toggle sort order (ascending/descending by change) |
+| `a` | Buy selected holding (Portfolio view) |
+| `x` | Sell selected holding (Portfolio view) |
+| `e` | Edit selected holding quantity/cost (Portfolio view) |
+| `D` | Delete selected holding (Portfolio view) |
 | `p` | Switch to Portfolio view |
 | `d` | Switch to Dashboard view |
 | `P` | Toggle Privacy mode |

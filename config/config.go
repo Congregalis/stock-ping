@@ -41,9 +41,10 @@ type Rule struct {
 
 // Holding defines a user's stock position
 type Holding struct {
-	Symbol    string  `yaml:"symbol"`
-	Quantity  float64 `yaml:"quantity"`
-	CostPrice float64 `yaml:"cost_price"`
+	Symbol      string  `yaml:"symbol"`
+	Quantity    float64 `yaml:"quantity"`
+	CostPrice   float64 `yaml:"cost_price"`
+	RealizedPnL float64 `yaml:"realized_pnl"`
 }
 
 // DefaultConfigPath returns the default config file path

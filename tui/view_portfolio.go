@@ -17,23 +17,29 @@ func (m Model) ViewPortfolio() string {
 	b.WriteString("\n\n")
 
 	// Calculate totals
-	var totalValue, totalCost, totalPL float64
+	var totalValue, totalCost, totalRealized, totalUnrealized float64
 	for _, symbol := range m.stockOrder {
 		data := m.stocks[symbol]
 		if data == nil || data.Quantity <= 0 {
 			continue
 		}
-		value := data.Price * data.Quantity
-		cost := data.CostPrice * data.Quantity
-		totalValue += value
-		totalCost += cost
-		totalPL += value - cost
+
+		if data.Price > 0 {
+			totalValue += data.Price * data.Quantity
+			totalUnrealized += (data.Price - data.CostPrice) * data.Quantity
+		}
+
+		totalCost += data.CostPrice * data.Quantity
+		totalRealized += data.RealizedPnL
 	}
+	totalPL := totalRealized + totalUnrealized
 
 	// Summary Cards
-	if totalCost > 0 {
+	if m.holdingsCount > 0 {
 		visValue := fmt.Sprintf("$%.2f", totalValue)
 		visCost := fmt.Sprintf("$%.2f", totalCost)
+		visRealized := fmt.Sprintf("$%.2f", absFloat(totalRealized))
+		visUnrealized := fmt.Sprintf("$%.2f", absFloat(totalUnrealized))
 
 		absPL := totalPL
 		plStyle := greenStyle
@@ -46,10 +52,15 @@ func (m Model) ViewPortfolio() string {
 		if m.privacyMode {
 			visValue = "****"
 			visCost = "****"
+			visRealized = "****"
+			visUnrealized = "****"
 			visPL = "****"
 		}
 
-		plPercent := (totalPL / totalCost) * 100
+		plPercent := 0.0
+		if totalCost > 0 {
+			plPercent = (totalPL / totalCost) * 100
+		}
 		if plPercent < 0 {
 			plPercent = -plPercent
 		}
@@ -81,7 +92,35 @@ func (m Model) ViewPortfolio() string {
 			),
 		)
 
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, valueCard, costCard, plCard))
+		realizedStyle := greenStyle
+		realizedContent := fmt.Sprintf("+%s", visRealized)
+		if totalRealized < 0 {
+			realizedStyle = redStyle
+			realizedContent = fmt.Sprintf("-%s", visRealized)
+		}
+
+		unrealizedStyle := greenStyle
+		unrealizedContent := fmt.Sprintf("+%s", visUnrealized)
+		if totalUnrealized < 0 {
+			unrealizedStyle = redStyle
+			unrealizedContent = fmt.Sprintf("-%s", visUnrealized)
+		}
+
+		realizedCard := cardStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				summaryLabelStyle.Render("REALIZED P/L"),
+				realizedStyle.Render(realizedContent),
+			),
+		)
+
+		unrealizedCard := cardStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				summaryLabelStyle.Render("UNREALIZED P/L"),
+				unrealizedStyle.Render(unrealizedContent),
+			),
+		)
+
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, valueCard, costCard, realizedCard, unrealizedCard, plCard))
 		b.WriteString("\n\n")
 	}
 
@@ -102,11 +141,42 @@ func (m Model) ViewPortfolio() string {
 	}
 
 	b.WriteString(statusBarStyle.Render(strings.Join(statusParts, " • ")))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	if m.positionAction != positionActionNone {
+		b.WriteString("\n")
+		b.WriteString(cardStyle.Render(m.renderPositionActionView()))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	// Help with updated keys hint
 	helpView := m.help.View(m.keys)
 	b.WriteString(mutedStyle.Render(helpView))
 
 	return b.String()
+}
+
+func (m Model) renderPositionActionView() string {
+	if m.positionAction == positionActionDelete {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			summaryLabelStyle.Render(m.positionActionTitle()),
+			"Press Enter to confirm delete",
+			"Press Esc to cancel",
+		)
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		summaryLabelStyle.Render(m.positionActionTitle()),
+		summaryLabelStyle.Render(m.positionActionPrompt()),
+		m.positionInput.View(),
+		mutedStyle.Render("Enter: confirm • Esc: cancel"),
+	)
+}
+
+func absFloat(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
 }

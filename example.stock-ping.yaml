@@ -40,3 +40,9 @@ rules:
     name: Gold
     price_below: 2000
 
+# 持仓 (可选)
+# holdings:
+#   - symbol: AAPL
+#     quantity: 100
+#     cost_price: 150.5
+#     realized_pnl: 0

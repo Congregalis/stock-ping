@@ -15,14 +15,18 @@ type keyMap struct {
 	Portfolio key.Binding // p - switch to portfolio view
 	Dashboard key.Binding // d - switch to dashboard view
 	Privacy   key.Binding // P - toggle privacy/share mode
+	Buy       key.Binding // a - add position
+	Sell      key.Binding // x - reduce position
+	Edit      key.Binding // e - edit position
+	Delete    key.Binding // D - delete holding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Refresh, k.Sort, k.Portfolio, k.Dashboard, k.Privacy, k.Select, k.Quit, k.Help}
+	return []key.Binding{k.Refresh, k.Sort, k.Buy, k.Sell, k.Edit, k.Delete, k.Portfolio, k.Dashboard, k.Privacy, k.Select, k.Quit, k.Help}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Refresh, k.Sort, k.Portfolio, k.Dashboard, k.Privacy, k.Select, k.Back, k.Quit, k.Help}}
+	return [][]key.Binding{{k.Refresh, k.Sort, k.Buy, k.Sell, k.Edit, k.Delete, k.Portfolio, k.Dashboard, k.Privacy, k.Select, k.Back, k.Quit, k.Help}}
 }
 
 var defaultKeyMap = keyMap{
@@ -61,5 +65,21 @@ var defaultKeyMap = keyMap{
 	Privacy: key.NewBinding(
 		key.WithKeys("P"),
 		key.WithHelp("P", "privacy mode"),
+	),
+	Buy: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "buy"),
+	),
+	Sell: key.NewBinding(
+		key.WithKeys("x"),
+		key.WithHelp("x", "sell"),
+	),
+	Edit: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "edit"),
+	),
+	Delete: key.NewBinding(
+		key.WithKeys("D"),
+		key.WithHelp("D", "delete"),
 	),
 }

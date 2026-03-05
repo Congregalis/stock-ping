@@ -129,10 +129,16 @@ func runHoldingAdd(args []string) {
 	}
 
 	// Create holding
+	realizedPnL := 0.0
+	if existing := cfg.GetHolding(*symbol); existing != nil {
+		realizedPnL = existing.RealizedPnL
+	}
+
 	holding := config.Holding{
-		Symbol:    *symbol,
-		Quantity:  *quantity,
-		CostPrice: *costPrice,
+		Symbol:      *symbol,
+		Quantity:    *quantity,
+		CostPrice:   *costPrice,
+		RealizedPnL: realizedPnL,
 	}
 
 	// Add holding

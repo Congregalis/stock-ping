@@ -2,12 +2,15 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/congregalis/stock-ping/config"
@@ -22,6 +25,14 @@ const (
 	ViewPortfolio = iota
 	ViewDashboard
 	ViewTrend
+)
+
+const (
+	positionActionNone = iota
+	positionActionBuy
+	positionActionSell
+	positionActionEdit
+	positionActionDelete
 )
 
 // StockData holds the current state of a stock
@@ -40,14 +51,16 @@ type StockData struct {
 	Error         string
 	Market        string
 	// Portfolio fields
-	Quantity  float64
-	CostPrice float64
+	Quantity    float64
+	CostPrice   float64
+	RealizedPnL float64
 }
 
 // Model represents the TUI application state
 type Model struct {
 	// Core State
 	viewMode       int
+	previousView   int
 	selectedSymbol string
 
 	// Data
@@ -83,6 +96,13 @@ type Model struct {
 	showSplash     bool
 	holdingsCount  int
 	privacyMode    bool
+
+	// Portfolio action state
+	positionAction   int
+	positionSymbol   string
+	positionStep     int
+	positionQuantity float64
+	positionInput    textinput.Model
 }
 
 // NewModel creates a new TUI model
@@ -122,6 +142,10 @@ func NewModel(cfg *config.Config, stockClient *stock.Client, notifier *notify.No
 		Focused(true).
 		WithPageSize(20)
 
+	positionInput := textinput.New()
+	positionInput.CharLimit = 32
+	positionInput.Width = 24
+
 	stocks := make(map[string]*StockData)
 	var stockOrder []string
 	for _, r := range cfg.Rules {
@@ -139,6 +163,7 @@ func NewModel(cfg *config.Config, stockClient *stock.Client, notifier *notify.No
 		if data, ok := stocks[h.Symbol]; ok {
 			data.Quantity = h.Quantity
 			data.CostPrice = h.CostPrice
+			data.RealizedPnL = h.RealizedPnL
 			holdingsCount++
 		}
 	}
@@ -160,6 +185,7 @@ func NewModel(cfg *config.Config, stockClient *stock.Client, notifier *notify.No
 		sortAscending:  false, // Default to Descending
 		showSplash:     true,
 		holdingsCount:  holdingsCount,
+		positionInput:  positionInput,
 	}
 
 	// Apply initial sort (Change Descending)
@@ -245,6 +271,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if m.positionAction != positionActionNone {
+			return m, m.handlePositionActionKey(msg)
+		}
+
 		// Common keys
 		if key.Matches(msg, m.keys.Quit) {
 			m.quitting = true
@@ -280,17 +310,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, m.keys.Dashboard):
 				m.viewMode = ViewDashboard
 				return m, nil
+			case key.Matches(msg, m.keys.Buy):
+				return m, m.startPositionAction(positionActionBuy)
+			case key.Matches(msg, m.keys.Sell):
+				return m, m.startPositionAction(positionActionSell)
+			case key.Matches(msg, m.keys.Edit):
+				return m, m.startPositionAction(positionActionEdit)
+			case key.Matches(msg, m.keys.Delete):
+				return m, m.startPositionAction(positionActionDelete)
 			case key.Matches(msg, m.keys.Select):
 				// Switch to Trend View from portfolio
 				selectedRow := m.portfolioTable.HighlightedRow()
 				if selectedRow.Data != nil {
-					raw := selectedRow.Data["symbol"].(string)
-					parts := strings.Split(raw, "(")
-					symbol := strings.TrimSpace(parts[0])
-					if idx := strings.LastIndex(symbol, " "); idx != -1 {
-						symbol = symbol[idx+1:]
+					raw, _ := selectedRow.Data["symbol"].(string)
+					symbol := parseSymbolFromTable(raw)
+					if symbol == "" {
+						return m, nil
 					}
 					m.selectedSymbol = symbol
+					m.previousView = ViewPortfolio
 					m.viewMode = ViewTrend
 					m.trendLoading = true
 					m.trendData = nil
@@ -319,18 +357,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Switch to Trend View
 				selectedRow := m.table.HighlightedRow()
 				if selectedRow.Data != nil {
-					// Parse symbol from "Symbol" or "Symbol(Name)"
-					raw := selectedRow.Data["symbol"].(string)
-					// Remove prefixes if any (like icons)
-					// Remove suffixes
-					parts := strings.Split(raw, "(")
-					symbol := strings.TrimSpace(parts[0])
-					// Handle cases where symbol might be "⚠️ SYMBOL"
-					if idx := strings.LastIndex(symbol, " "); idx != -1 {
-						symbol = symbol[idx+1:]
+					raw, _ := selectedRow.Data["symbol"].(string)
+					symbol := parseSymbolFromTable(raw)
+					if symbol == "" {
+						return m, nil
 					}
 
 					m.selectedSymbol = symbol
+					m.previousView = ViewDashboard
 					m.viewMode = ViewTrend
 					m.trendLoading = true
 					m.trendData = nil
@@ -341,7 +375,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.viewMode == ViewTrend {
 			switch {
 			case key.Matches(msg, m.keys.Back):
-				m.viewMode = ViewPortfolio
+				if m.previousView == ViewDashboard {
+					m.viewMode = ViewDashboard
+				} else {
+					m.viewMode = ViewPortfolio
+				}
 				m.selectedSymbol = ""
 				return m, nil
 			case key.Matches(msg, m.keys.Portfolio):
@@ -528,6 +566,10 @@ func (m *Model) reloadRules() {
 	for _, r := range m.cfg.Rules {
 		if existing, ok := m.stocks[r.Symbol]; ok {
 			existing.Name = r.Name
+			existing.Market = r.Market
+			existing.Quantity = 0
+			existing.CostPrice = 0
+			existing.RealizedPnL = 0
 			newStocks[r.Symbol] = existing
 		} else {
 			newStocks[r.Symbol] = &StockData{
@@ -544,6 +586,7 @@ func (m *Model) reloadRules() {
 		if data, ok := newStocks[h.Symbol]; ok {
 			data.Quantity = h.Quantity
 			data.CostPrice = h.CostPrice
+			data.RealizedPnL = h.RealizedPnL
 			holdingsCount++
 		}
 	}
@@ -658,38 +701,40 @@ func (m *Model) updatePortfolioTableRows() {
 			} else {
 				changeStr = redStyle.Render(fmt.Sprintf("-$%.2f (%.2f%%)", -priceChange, data.Change))
 			}
+		}
 
-			// Portfolio calculations
-			value := data.Price * data.Quantity
-			cost := data.CostPrice * data.Quantity
-			pl := value - cost
-			plPercent := 0.0
-			if cost > 0 {
-				plPercent = (pl / cost) * 100
-			}
+		// Portfolio calculations (Total P/L = Realized + Unrealized)
+		unrealizedPnL := 0.0
+		if data.Price > 0 {
+			unrealizedPnL = (data.Price - data.CostPrice) * data.Quantity
+		}
+		totalPnL := data.RealizedPnL + unrealizedPnL
+		plPercent := 0.0
+		cost := data.CostPrice * data.Quantity
+		if cost > 0 {
+			plPercent = (totalPnL / cost) * 100
+		}
 
-			// Merged P/L and P/L% column
-			visPl := ""
-			if m.privacyMode {
-				visPl = "****"
-			} else {
-				absPl := pl
-				if pl < 0 {
-					absPl = -pl
-				}
-				visPl = fmt.Sprintf("$%.2f", absPl)
+		visPl := ""
+		if m.privacyMode {
+			visPl = "****"
+		} else {
+			absPl := totalPnL
+			if totalPnL < 0 {
+				absPl = -totalPnL
 			}
+			visPl = fmt.Sprintf("$%.2f", absPl)
+		}
 
-			absPlPercent := plPercent
-			if plPercent < 0 {
-				absPlPercent = -plPercent
-			}
+		absPlPercent := plPercent
+		if plPercent < 0 {
+			absPlPercent = -plPercent
+		}
 
-			if pl >= 0 {
-				plStr = greenStyle.Render(fmt.Sprintf("+%s (+%.2f%%)", visPl, absPlPercent))
-			} else {
-				plStr = redStyle.Render(fmt.Sprintf("-%s (-%.2f%%)", visPl, absPlPercent))
-			}
+		if totalPnL >= 0 {
+			plStr = greenStyle.Render(fmt.Sprintf("+%s (+%.2f%%)", visPl, absPlPercent))
+		} else {
+			plStr = redStyle.Render(fmt.Sprintf("-%s (-%.2f%%)", visPl, absPlPercent))
 		}
 
 		rows = append(rows, table.NewRow(table.RowData{
@@ -702,4 +747,273 @@ func (m *Model) updatePortfolioTableRows() {
 		}))
 	}
 	m.portfolioTable = m.portfolioTable.WithRows(rows)
+}
+
+func (m Model) selectedPortfolioSymbol() (string, bool) {
+	selectedRow := m.portfolioTable.HighlightedRow()
+	if selectedRow.Data == nil {
+		return "", false
+	}
+
+	raw, ok := selectedRow.Data["symbol"].(string)
+	if !ok {
+		return "", false
+	}
+
+	symbol := parseSymbolFromTable(raw)
+	if symbol == "" {
+		return "", false
+	}
+
+	return symbol, true
+}
+
+func (m *Model) startPositionAction(action int) tea.Cmd {
+	symbol, ok := m.selectedPortfolioSymbol()
+	if !ok {
+		m.statusMessage = "No holding selected"
+		return nil
+	}
+
+	m.positionAction = action
+	m.positionSymbol = symbol
+	m.positionStep = 0
+	m.positionQuantity = 0
+
+	if action != positionActionDelete {
+		m.positionInput.SetValue("")
+		m.positionInput.Focus()
+		return textinput.Blink
+	}
+
+	return nil
+}
+
+func (m *Model) resetPositionAction() {
+	m.positionAction = positionActionNone
+	m.positionSymbol = ""
+	m.positionStep = 0
+	m.positionQuantity = 0
+	m.positionInput.SetValue("")
+	m.positionInput.Blur()
+}
+
+func (m *Model) handlePositionActionKey(msg tea.KeyMsg) tea.Cmd {
+	if msg.Type == tea.KeyEsc {
+		m.resetPositionAction()
+		m.statusMessage = "Operation canceled"
+		return nil
+	}
+
+	if msg.Type == tea.KeyEnter {
+		m.confirmPositionAction()
+		return nil
+	}
+
+	if m.positionAction == positionActionDelete {
+		return nil
+	}
+
+	var cmd tea.Cmd
+	m.positionInput, cmd = m.positionInput.Update(msg)
+	return cmd
+}
+
+func (m *Model) confirmPositionAction() {
+	if m.positionAction == positionActionDelete {
+		m.deleteSelectedHolding()
+		return
+	}
+
+	inputValue := strings.TrimSpace(m.positionInput.Value())
+	if inputValue == "" {
+		m.statusMessage = "Please enter a number"
+		return
+	}
+
+	parsedValue, err := strconv.ParseFloat(inputValue, 64)
+	if err != nil {
+		m.statusMessage = "Invalid number format"
+		return
+	}
+
+	if m.positionStep == 0 {
+		if parsedValue <= 0 {
+			m.statusMessage = "Quantity must be greater than 0"
+			return
+		}
+
+		if m.positionAction == positionActionSell {
+			holding := m.cfg.GetHolding(m.positionSymbol)
+			if holding == nil {
+				m.statusMessage = fmt.Sprintf("Holding %s not found", m.positionSymbol)
+				m.resetPositionAction()
+				return
+			}
+			if parsedValue > holding.Quantity+1e-9 {
+				m.statusMessage = "Sell quantity exceeds current holding"
+				return
+			}
+		}
+
+		m.positionQuantity = parsedValue
+		m.positionStep = 1
+		m.positionInput.SetValue("")
+		return
+	}
+
+	if parsedValue < 0 {
+		m.statusMessage = "Price must be greater than or equal to 0"
+		return
+	}
+
+	m.applyPositionChange(parsedValue)
+	m.resetPositionAction()
+}
+
+func (m *Model) applyPositionChange(price float64) {
+	if m.positionSymbol == "" {
+		m.statusMessage = "No holding selected"
+		return
+	}
+
+	previousHoldings := append([]config.Holding(nil), m.cfg.Holdings...)
+	holding := m.cfg.GetHolding(m.positionSymbol)
+	if holding == nil {
+		m.statusMessage = fmt.Sprintf("Holding %s not found", m.positionSymbol)
+		return
+	}
+
+	quantity := m.positionQuantity
+	successMessage := ""
+
+	switch m.positionAction {
+	case positionActionBuy:
+		newTotalQty := holding.Quantity + quantity
+		newAvgCost := ((holding.Quantity * holding.CostPrice) + (quantity * price)) / newTotalQty
+		holding.Quantity = newTotalQty
+		holding.CostPrice = newAvgCost
+		successMessage = fmt.Sprintf("Bought %s %s @ %.2f", formatQuantityValue(quantity), m.positionSymbol, price)
+	case positionActionSell:
+		if quantity > holding.Quantity+1e-9 {
+			m.statusMessage = "Sell quantity exceeds current holding"
+			return
+		}
+
+		avgCost := holding.CostPrice
+		remainingQty := holding.Quantity - quantity
+		realizedDelta := (price - avgCost) * quantity
+
+		if remainingQty <= 1e-9 {
+			m.cfg.RemoveHolding(m.positionSymbol)
+		} else {
+			holding.Quantity = remainingQty
+			holding.CostPrice = avgCost
+			holding.RealizedPnL += realizedDelta
+		}
+
+		successMessage = fmt.Sprintf(
+			"Sold %s %s @ %.2f, Realized %s",
+			formatQuantityValue(quantity),
+			m.positionSymbol,
+			price,
+			formatSignedValue(realizedDelta),
+		)
+	case positionActionEdit:
+		holding.Quantity = quantity
+		holding.CostPrice = price
+		successMessage = fmt.Sprintf("Updated %s: %s @ %.2f", m.positionSymbol, formatQuantityValue(quantity), price)
+	default:
+		return
+	}
+
+	if err := m.cfg.SaveTo(m.configPath); err != nil {
+		m.cfg.Holdings = previousHoldings
+		m.statusMessage = fmt.Sprintf("Failed to save config: %v", err)
+		return
+	}
+
+	m.reloadRules()
+	m.statusMessage = successMessage
+}
+
+func (m *Model) deleteSelectedHolding() {
+	if m.positionSymbol == "" {
+		m.statusMessage = "No holding selected"
+		m.resetPositionAction()
+		return
+	}
+
+	previousHoldings := append([]config.Holding(nil), m.cfg.Holdings...)
+	if !m.cfg.RemoveHolding(m.positionSymbol) {
+		m.statusMessage = fmt.Sprintf("Holding %s not found", m.positionSymbol)
+		m.resetPositionAction()
+		return
+	}
+
+	if err := m.cfg.SaveTo(m.configPath); err != nil {
+		m.cfg.Holdings = previousHoldings
+		m.statusMessage = fmt.Sprintf("Failed to save config: %v", err)
+		m.resetPositionAction()
+		return
+	}
+
+	m.reloadRules()
+	m.statusMessage = fmt.Sprintf("Deleted holding %s", m.positionSymbol)
+	m.resetPositionAction()
+}
+
+func (m Model) positionActionTitle() string {
+	switch m.positionAction {
+	case positionActionBuy:
+		return fmt.Sprintf("Buy %s", m.positionSymbol)
+	case positionActionSell:
+		return fmt.Sprintf("Sell %s", m.positionSymbol)
+	case positionActionEdit:
+		return fmt.Sprintf("Edit %s", m.positionSymbol)
+	case positionActionDelete:
+		return fmt.Sprintf("Delete %s", m.positionSymbol)
+	default:
+		return ""
+	}
+}
+
+func (m Model) positionActionPrompt() string {
+	if m.positionStep == 0 {
+		return "Quantity (> 0)"
+	}
+
+	switch m.positionAction {
+	case positionActionBuy:
+		return "Buy Price (>= 0)"
+	case positionActionSell:
+		return "Sell Price (>= 0)"
+	case positionActionEdit:
+		return "Cost Price (>= 0)"
+	default:
+		return ""
+	}
+}
+
+func parseSymbolFromTable(raw string) string {
+	parts := strings.Split(raw, "(")
+	symbol := strings.TrimSpace(parts[0])
+	if idx := strings.LastIndex(symbol, " "); idx != -1 {
+		symbol = symbol[idx+1:]
+	}
+	return symbol
+}
+
+func formatQuantityValue(value float64) string {
+	if math.Abs(value-math.Round(value)) < 1e-9 {
+		return fmt.Sprintf("%.0f", value)
+	}
+	return fmt.Sprintf("%.2f", value)
+}
+
+func formatSignedValue(value float64) string {
+	if value >= 0 {
+		return fmt.Sprintf("+%.2f", value)
+	}
+	return fmt.Sprintf("%.2f", value)
 }
